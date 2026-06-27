@@ -1,0 +1,23 @@
+# ============================================================================
+# Watchdog — the dead-man's switch.
+# This alert ALWAYS fires. Alertmanager forwards it to the narrator on a steady
+# cadence. The narrator resets a deadline on every Watchdog it receives; if the
+# heartbeat stops (Prometheus/Alertmanager/local pipeline dead), the narrator
+# self-alarms. If the WHOLE local stack is down, the PEER narrator's cross-watch
+# catches it instead — so an outage cannot silence its own alarm.
+# ============================================================================
+groups:
+  - name: watchdog
+    rules:
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: info
+          scope: site
+          component: watchdog
+        annotations:
+          summary: 'Argus heartbeat'
+          description: 'Steady-state heartbeat proving the alerting pipeline (Prometheus -> Alertmanager -> narrator) is alive.'
+          likely_cause: ''
+          next_step: ''
+          runbook: ''

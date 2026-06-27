@@ -1,0 +1,79 @@
+# ============================================================================
+# Argus narrator policy. Env vars (ARGUS_SITE, NTFY_*, PROMETHEUS_URL,
+# PEER_NARRATOR_URL, WATCHDOG_DEADLINE_SECONDS) override matching fields.
+# ============================================================================
+site: homelab
+external_url: http://argus.lan:8088
+prometheus_url: http://prometheus:9090
+peer_narrator_url: ""
+peer_site: hetzner
+
+# Dead-man's switch: if no Watchdog heartbeat within this many seconds, self-alarm.
+watchdog_deadline_s: 180
+
+# Flap detection: N firings of the same alert within the window bumps urgency.
+flap_window_s: 1800
+flap_threshold: 4
+
+ntfy:
+  server: https://ntfy.xniicki.de
+  topic: argus
+  token: ""        # prefer NTFY_TOKEN env
+
+# --- Phase 4: optional LLM root-cause hints via OpenRouter -----------------
+# Disabled unless OPENROUTER_API_KEY (env) is set. Adds one "AI HINT" line.
+llm:
+  enabled: true                          # also gated by presence of an API key
+  base_url: https://openrouter.ai/api/v1 # prefer OPENROUTER_BASE_URL env
+  api_key: ""                            # prefer OPENROUTER_API_KEY env
+  model: anthropic/claude-3.5-sonnet     # prefer OPENROUTER_MODEL env
+  max_tokens: 220
+  timeout_s: 20
+
+# --- Urgency engine: score = severity + scope + component + role + recurrence ---
+urgency:
+  severity_points:   { info: 0, warning: 3, critical: 6 }
+  scope_points:      { single: 0, host: 2, site: 3 }
+  recurrence_bonus:  1            # added when the alert is flapping (>= flap_threshold)
+
+  # Additive weight by `component` label (what kind of thing broke).
+  component_weights:
+    proxmox-guest: 1
+    zfs: 1
+    proxmox-api: 0
+    backup: 0
+    cert: 0
+    watchdog: -100               # never notifies via the normal path
+    endpoint: 0
+    service-port: 0
+    security: 0                  # tier driven by severity+scope (SSH brute-force etc.)
+    change: 0                    # config/state change tracking
+    logs: 0
+
+  # Additive weight by `role` label (how important the affected host is).
+  role_weights:
+    hypervisor: 3                 # PVE host down -> push to Emergency
+    edge: 1                       # Hetzner VPS matters
+    service: 0
+
+  # score -> tier (highest threshold whose min <= score wins)
+  thresholds:
+    info: 0
+    notice: 2
+    warning: 4
+    critical: 7
+    emergency: 10
+
+  # Force a tier regardless of score (escape hatch).
+  overrides: {}
+    # CrossSitePathDown: critical
+    # ProxmoxBackupFailed: critical
+
+# --- How each tier is delivered over ntfy ---------------------------------
+# ntfy priorities: 1=min 2=low 3=default 4=high 5=max
+tier_policies:
+  info:      { priority: 1, push: false, tags: [mag] }
+  notice:    { priority: 2, push: true,  tags: [bell] }
+  warning:   { priority: 3, push: true,  tags: [warning] }
+  critical:  { priority: 4, push: true,  tags: [rotating_light], repeat_until_ack: true,  repeat_interval_s: 300 }
+  emergency: { priority: 5, push: true,  tags: [rotating_light, sos], repeat_until_ack: true, repeat_interval_s: 180 }

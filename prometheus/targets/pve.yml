@@ -1,0 +1,7 @@
+# Proxmox VE nodes to scrape via prometheus-pve-exporter.
+# The address here becomes the `target` param handed to the exporter.
+- targets:
+    - "192.168.1.10"           # PVE node / cluster member
+  labels:
+    cluster: homelab-pve
+    site: homelab

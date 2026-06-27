@@ -1,0 +1,19 @@
+# TCP service ports to probe (connect succeeds = up).
+- targets:
+    - "192.168.1.10:8006"      # Proxmox web UI
+  labels:
+    service: pve-webui
+    role: hypervisor
+    site: homelab
+- targets:
+    - "192.168.1.20:22"        # SSH
+  labels:
+    service: app1-ssh
+    role: service
+    site: homelab
+- targets:
+    - "10.0.0.5:443"
+  labels:
+    service: vps-https
+    role: edge
+    site: hetzner

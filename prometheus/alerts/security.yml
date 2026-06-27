@@ -1,0 +1,63 @@
+# ============================================================================
+# Security & change detection — fires when host state fingerprints CHANGE.
+# Metrics come from agents/textfile-collectors/security_state.sh via node_exporter.
+# changes(metric[10m]) > 0  => the underlying state changed in the last 10m.
+# ============================================================================
+groups:
+  - name: security_change
+    rules:
+      - alert: AuthorizedKeysChanged
+        expr: changes(argus_ssh_authorized_keys_hash[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          scope: host
+          component: change
+        annotations:
+          summary: 'SSH authorized_keys changed on {{ $labels.host }}'
+          description: 'The set of authorized SSH keys on {{ $labels.host }} was added to, removed, or edited.'
+          likely_cause: 'A new key was deployed (intentional) — or an attacker installed a persistence key.'
+          next_step: 'If you did not change keys, treat as a breach: inspect /root/.ssh and /home/*/.ssh, rotate, and audit logins.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/authorized-keys-changed.md'
+
+      - alert: FirewallRulesChanged
+        expr: changes(argus_firewall_ruleset_hash[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          scope: host
+          component: change
+        annotations:
+          summary: 'Firewall ruleset changed on {{ $labels.host }}'
+          description: 'The active firewall ruleset (nft/iptables/ufw) on {{ $labels.host }} changed.'
+          likely_cause: 'A deploy/admin change — or an attacker opening a path.'
+          next_step: 'Diff the current ruleset against your expected config; confirm the change was intentional.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/firewall-changed.md'
+
+      - alert: ListeningPortsChanged
+        expr: changes(argus_listening_ports_hash[10m]) > 0
+        for: 0m
+        labels:
+          severity: info
+          scope: host
+          component: change
+        annotations:
+          summary: 'Listening ports changed on {{ $labels.host }}'
+          description: 'A service started or stopped listening on {{ $labels.host }}.'
+          likely_cause: 'A new service was deployed/restarted — or an unexpected process opened a port.'
+          next_step: 'Run `ss -lntup` on the host and confirm every new listener is expected.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/ports-changed.md'
+
+      - alert: InstalledPackagesChanged
+        expr: changes(argus_installed_packages_hash[10m]) > 0
+        for: 0m
+        labels:
+          severity: info
+          scope: host
+          component: change
+        annotations:
+          summary: 'Installed packages changed on {{ $labels.host }}'
+          description: 'The installed package set on {{ $labels.host }} changed (install/remove/upgrade).'
+          likely_cause: 'Routine updates (apt/dnf) — or unexpected software being installed.'
+          next_step: 'Confirm it matches a planned update window; review the package manager history if not.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/packages-changed.md'

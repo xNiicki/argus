@@ -1,0 +1,107 @@
+# ============================================================================
+# Argus — CENTRAL stack (one per site: homelab + hetzner).
+# Collectors: Prometheus + Blackbox + prometheus-pve-exporter.
+# Routing:    Alertmanager -> narrator webhook (narrator owns all tiering).
+# Brain:      narrator (custom FastAPI service).
+# Loki/Promtail arrive in Phase 2 (commented stub at bottom).
+# ============================================================================
+name: argus
+
+x-restart: &restart
+  restart: unless-stopped
+
+networks:
+  argus:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  alertmanager_data:
+  loki_data:
+
+services:
+  prometheus:
+    <<: *restart
+    image: prom/prometheus:v2.55.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle                       # allow `curl -XPOST .../-/reload`
+      - --enable-feature=expand-external-labels      # expand ${ARGUS_SITE} in external_labels
+      - --web.external-url=http://prometheus:9090
+    environment:
+      ARGUS_SITE: ${ARGUS_SITE:-homelab}
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks: [argus]
+
+  alertmanager:
+    <<: *restart
+    image: prom/alertmanager:v0.27.0
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager:/etc/alertmanager:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "9093:9093"
+    networks: [argus]
+
+  blackbox:
+    <<: *restart
+    image: prom/blackbox-exporter:v0.25.0
+    command:
+      - --config.file=/etc/blackbox/blackbox.yml
+    volumes:
+      - ./blackbox:/etc/blackbox:ro
+    ports:
+      - "9115:9115"
+    networks: [argus]
+    # ICMP probes need raw sockets:
+    cap_add:
+      - NET_RAW
+
+  pve-exporter:
+    <<: *restart
+    image: prompve/prometheus-pve-exporter:3.4.4
+    volumes:
+      - ./pve-exporter/pve.yml:/etc/pve.yml:ro
+    ports:
+      - "9221:9221"
+    networks: [argus]
+
+  narrator:
+    <<: *restart
+    # Pulled from GHCR by default (built by .github/workflows/build-narrator.yml).
+    # For local-source builds use `make dev` (adds docker-compose.build.yml).
+    image: ghcr.io/xniicki/argus-narrator:${ARGUS_TAG:-latest}
+    env_file: .env
+    environment:
+      # in-container service names override .env defaults
+      PROMETHEUS_URL: http://prometheus:9090
+    volumes:
+      - ./narrator/config:/app/config:ro
+    ports:
+      - "8088:8088"
+    networks: [argus]
+    depends_on:
+      - prometheus
+      - loki
+
+  # --- Phase 2: logs --------------------------------------------------------
+  loki:
+    <<: *restart
+    image: grafana/loki:3.2.1
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - ./loki/rules:/loki/rules/fake:ro      # ruler tenant dir (auth disabled -> "fake")
+      - loki_data:/loki
+    ports:
+      - "3100:3100"
+    networks: [argus]

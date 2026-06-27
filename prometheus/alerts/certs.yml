@@ -1,0 +1,34 @@
+# ============================================================================
+# SSL/TLS certificate expiry. Two thresholds -> two tiers.
+# probe_ssl_earliest_cert_expiry is a unix timestamp (seconds).
+# ============================================================================
+groups:
+  - name: certs
+    rules:
+      - alert: CertExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry{job="blackbox-ssl"} - time()) < (21 * 24 * 3600)
+        for: 1h
+        labels:
+          severity: warning
+          scope: single
+          component: cert
+        annotations:
+          summary: 'TLS cert for {{ $labels.service }} expires in < 21 days'
+          description: 'Certificate on {{ $labels.instance }} expires within 21 days (warning threshold).'
+          likely_cause: 'Automated renewal (ACME/certbot/Caddy/Traefik) did not run or failed; or a manual cert is approaching expiry.'
+          next_step: 'Trigger/inspect the renewal job (`certbot renew --dry-run`, check Caddy/Traefik ACME logs). Confirm DNS/HTTP-01 challenge reachability.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/cert-renew.md'
+
+      - alert: CertExpiringCritical
+        expr: (probe_ssl_earliest_cert_expiry{job="blackbox-ssl"} - time()) < (5 * 24 * 3600)
+        for: 30m
+        labels:
+          severity: critical
+          scope: single
+          component: cert
+        annotations:
+          summary: 'TLS cert for {{ $labels.service }} expires in < 5 days'
+          description: 'Certificate on {{ $labels.instance }} is about to expire — clients will start failing TLS.'
+          likely_cause: 'Renewal has been failing for a while. Imminent outage for anything depending on this cert.'
+          next_step: 'Renew NOW and reload the serving process. Check why auto-renew has not fired since the 21-day warning.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/cert-renew.md'

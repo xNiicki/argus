@@ -1,0 +1,13 @@
+# cAdvisor targets — hosts running containers.
+- targets:
+    - "192.168.1.20:8080"
+  labels:
+    host: app1
+    role: service
+    site: homelab
+- targets:
+    - "10.0.0.5:8080"
+  labels:
+    host: vps1
+    role: edge
+    site: hetzner

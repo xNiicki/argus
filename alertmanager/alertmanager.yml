@@ -1,0 +1,35 @@
+# ============================================================================
+# Argus — Alertmanager. Deliberately "dumb": it forwards ALL alerts to the
+# narrator webhook. Tiering, repeat-until-ack, dedup and message composition
+# all live in the narrator so the policy is in ONE place.
+# ============================================================================
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: narrator
+  # Keep alerts granular so the narrator sees each component distinctly.
+  group_by: ['alertname', 'instance', 'host', 'service']
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 1h          # narrator does its own repeat-until-ack for high tiers
+  routes:
+    # Heartbeat: forward frequently so the narrator's dead-man timer stays fed.
+    - receiver: narrator
+      matchers:
+        - alertname = "Watchdog"
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 1m
+      continue: false
+
+receivers:
+  - name: narrator
+    webhook_configs:
+      - url: http://narrator:8088/alerts/alertmanager
+        send_resolved: true
+        max_alerts: 0           # send all alerts in the group, never truncate
+
+# No inhibition here — the narrator handles correlation/suppression so the logic
+# stays testable and in one language.
+inhibit_rules: []

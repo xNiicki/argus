@@ -1,0 +1,20 @@
+# secrets & local state
+.env
+*.local.yml
+pve-exporter/pve.yml
+
+# macOS
+.DS_Store
+
+# data volumes (if bind-mounted)
+data/
+prometheus/data/
+alertmanager/data/
+
+# python
+narrator/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

@@ -1,0 +1,66 @@
+# ============================================================================
+# Uptime & reachability — hosts, service ports, HTTP endpoints.
+# Label convention (consumed by the narrator's urgency engine):
+#   severity: info|warning|critical   scope: single|host|site
+#   component: <kind>                  role:  carried from target labels
+# Annotations: summary / description / likely_cause / next_step / runbook
+# ============================================================================
+groups:
+  - name: uptime
+    rules:
+      - alert: HostDown
+        # node_exporter unreachable = the whole host is (probably) down.
+        expr: up{job="node"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          scope: host
+          component: host
+        annotations:
+          summary: 'Host {{ $labels.host }} is unreachable'
+          description: 'node_exporter on {{ $labels.instance }} (host {{ $labels.host }}, role {{ $labels.role }}) has not responded for >2m.'
+          likely_cause: 'Host powered off / crashed / kernel panic, network link down, or node_exporter stopped. If many hosts on one site dropped together, suspect the site uplink rather than the host.'
+          next_step: 'Check power & console (Proxmox UI for guests). Ping the host; if it answers but the exporter is down, restart node_exporter. Check the switch/VLAN.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/host-down.md'
+
+      - alert: ServicePortDown
+        expr: probe_success{job="blackbox-tcp"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          scope: single
+          component: service-port
+        annotations:
+          summary: 'Service {{ $labels.service }} TCP port unreachable'
+          description: 'TCP probe to {{ $labels.instance }} ({{ $labels.service }}) failing for >2m while its host may still be up.'
+          likely_cause: 'The service crashed or stopped listening, a firewall rule changed, or the port moved. Host-level reachability is tracked separately.'
+          next_step: 'On the host: `systemctl status <svc>` / `ss -ltnp | grep <port>`. Check recent deploys and firewall (ufw/nft) changes.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/service-down.md'
+
+      - alert: HttpEndpointDown
+        expr: probe_success{job="blackbox-http"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          scope: single
+          component: endpoint
+        annotations:
+          summary: 'HTTP endpoint {{ $labels.service }} is failing'
+          description: 'HTTP probe to {{ $labels.instance }} returned non-2xx or timed out for >2m.'
+          likely_cause: 'App returning 5xx, backend/dependency down, TLS error, or the reverse proxy is misrouting.'
+          next_step: 'curl -v the endpoint, check app + reverse-proxy logs (link below), confirm upstream/database health.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/http-down.md'
+
+      - alert: HttpEndpointSlow
+        expr: probe_http_duration_seconds{job="blackbox-http"} > 3
+        for: 5m
+        labels:
+          severity: warning
+          scope: single
+          component: endpoint
+        annotations:
+          summary: 'HTTP endpoint {{ $labels.service }} is slow'
+          description: '{{ $labels.instance }} response time > 3s (currently {{ $value | printf "%.1f" }}s) for >5m.'
+          likely_cause: 'CPU/IO saturation on the backend, slow dependency, or GC/connection-pool exhaustion.'
+          next_step: 'Correlate with host CPU/IO metrics; inspect slow-query and app latency logs.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/http-slow.md'

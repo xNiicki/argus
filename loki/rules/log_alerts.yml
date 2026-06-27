@@ -1,0 +1,59 @@
+# ============================================================================
+# Loki ruler — LogQL alerts. Same label convention as metric rules
+# (severity/scope/component) so the narrator tiers them identically.
+# component: logs  -> narrator adds a Logs link to the push.
+# ============================================================================
+groups:
+  - name: logs
+    rules:
+      - alert: AppErrorBurst
+        expr: |
+          sum by (host, job, container) (
+            rate({job=~"docker|containers"} |~ "(?i)\\b(error|exception|fatal|panic|traceback)\\b" [5m])
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          scope: single
+          component: logs
+        annotations:
+          summary: 'Error burst in {{ $labels.container }} on {{ $labels.host }}'
+          description: 'Sustained error-level log lines (>0.5/s over 5m) from {{ $labels.container }}.'
+          likely_cause: 'A bug, a failing dependency, or bad input causing repeated exceptions.'
+          next_step: 'Open the logs (link) and read the top recurring error; correlate with recent deploys.'
+          logs: 'http://loki.lan:3100'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/app-errors.md'
+
+      - alert: SystemErrorBurst
+        expr: |
+          sum by (host) (
+            rate({job="journal"} |~ "(?i)(segfault|I/O error|EXT4-fs error|kernel panic|hung_task)" [5m])
+          ) > 0
+        for: 2m
+        labels:
+          severity: critical
+          scope: host
+          component: logs
+        annotations:
+          summary: 'Kernel/system errors on {{ $labels.host }}'
+          description: 'The kernel journal on {{ $labels.host }} shows hardware/filesystem/kernel errors.'
+          likely_cause: 'Failing disk, RAM faults, or a kernel-level fault.'
+          next_step: 'Check dmesg/journal (link), SMART status, and memory; this can precede data loss.'
+          logs: 'http://loki.lan:3100'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/system-errors.md'
+
+      - alert: OutOfMemoryKill
+        expr: |
+          sum by (host) (count_over_time({job="journal"} |~ "Out of memory: Kill" [5m])) > 0
+        for: 0m
+        labels:
+          severity: warning
+          scope: host
+          component: logs
+        annotations:
+          summary: 'OOM killer fired on {{ $labels.host }}'
+          description: 'The kernel killed a process due to memory exhaustion on {{ $labels.host }}.'
+          likely_cause: 'A process exceeded available memory; a container without a sane limit, or a leak.'
+          next_step: 'Identify the killed process in the journal (link); set/adjust memory limits or add RAM.'
+          logs: 'http://loki.lan:3100'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/oom.md'

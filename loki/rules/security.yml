@@ -1,0 +1,54 @@
+# ============================================================================
+# Loki ruler — security events from logs (sshd / sudo via the journal).
+# component: security  -> narrator tiers by severity+scope and adds a Logs link.
+# ============================================================================
+groups:
+  - name: security
+    rules:
+      - alert: SSHBruteForce
+        expr: |
+          sum by (host) (count_over_time({job="journal"} |~ "Failed password|Invalid user|authentication failure" [5m])) > 10
+        for: 0m
+        labels:
+          severity: warning
+          scope: host
+          component: security
+        annotations:
+          summary: 'Possible SSH brute-force on {{ $labels.host }}'
+          description: '>10 failed SSH auth attempts on {{ $labels.host }} within 5m.'
+          likely_cause: 'Automated credential-stuffing/brute-force from one or more IPs, or a misconfigured client.'
+          next_step: 'Check the source IPs in the journal (link); confirm fail2ban/firewall is active; consider key-only auth.'
+          logs: 'http://loki.lan:3100'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/ssh-bruteforce.md'
+
+      - alert: SSHRootLogin
+        expr: |
+          sum by (host) (count_over_time({job="journal"} |~ "Accepted (password|publickey) for root" [5m])) > 0
+        for: 0m
+        labels:
+          severity: info
+          scope: host
+          component: security
+        annotations:
+          summary: 'Root logged in over SSH on {{ $labels.host }}'
+          description: 'A successful root SSH login occurred on {{ $labels.host }}.'
+          likely_cause: 'An admin session — or unauthorised access if you did not initiate it.'
+          next_step: 'Confirm this was you (source IP in logs). If not, rotate credentials and investigate immediately.'
+          logs: 'http://loki.lan:3100'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/ssh-root-login.md'
+
+      - alert: SudoAuthFailure
+        expr: |
+          sum by (host) (count_over_time({job="journal"} |~ "sudo:.*authentication failure|sudo:.*incorrect password" [10m])) > 3
+        for: 0m
+        labels:
+          severity: warning
+          scope: host
+          component: security
+        annotations:
+          summary: 'Repeated sudo failures on {{ $labels.host }}'
+          description: '>3 failed sudo authentications on {{ $labels.host }} within 10m.'
+          likely_cause: 'A user fat-fingering a password — or an attempt to escalate privileges.'
+          next_step: 'Identify the user/tty in the journal (link); verify it was legitimate.'
+          logs: 'http://loki.lan:3100'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/sudo-failure.md'

@@ -1,0 +1,21 @@
+# ICMP reachability + latency/packet-loss. Covers LAN, gateway, WAN, and the
+# homelab<->Hetzner path. `tier` lets rules treat gateway/WAN specially.
+- targets:
+    - "192.168.1.1"            # LAN gateway / router
+  labels:
+    target_name: gateway
+    tier: gateway
+    site: homelab
+- targets:
+    - "1.1.1.1"                # WAN reachability (upstream internet)
+    - "8.8.8.8"
+  labels:
+    target_name: wan
+    tier: wan
+    site: homelab
+- targets:
+    - "10.0.0.5"               # Hetzner VPS — the cross-site path
+  labels:
+    target_name: hetzner-path
+    tier: cross-site
+    site: homelab

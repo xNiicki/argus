@@ -1,0 +1,14 @@
+# DNS resolution checks. The probe target is the DNS server; the queried name
+# is set in blackbox.yml (dns_udp module). Add more resolvers as needed.
+- targets:
+    - "192.168.1.1"            # local resolver / router
+  labels:
+    resolver: lan-dns
+    tier: dns
+    site: homelab
+- targets:
+    - "1.1.1.1"                # upstream resolver
+  labels:
+    resolver: cloudflare-dns
+    tier: dns
+    site: homelab

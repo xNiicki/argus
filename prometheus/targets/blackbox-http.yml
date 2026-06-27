@@ -1,0 +1,13 @@
+# HTTP endpoints to probe for availability/correctness (2xx).
+- targets:
+    - "http://192.168.1.20:3000/healthz"
+  labels:
+    service: app1-web
+    role: service
+    site: homelab
+- targets:
+    - "https://hetzner.example.net"
+  labels:
+    service: vps-public
+    role: edge
+    site: hetzner

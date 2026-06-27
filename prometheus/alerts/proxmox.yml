@@ -1,0 +1,128 @@
+# ============================================================================
+# Proxmox VE — first-class target.
+#   pve_* metrics:   prometheus-pve-exporter (node/VM/LXC/storage/quorum)
+#   argus_* metrics: textfile collectors on the PVE host (ZFS health/scrub,
+#                    PVE/PBS backup success) — see agents/textfile-collectors/.
+# A guest dying (ProxmoxGuestDown) is DISTINCT from the host being down
+# (HostDown with role=hypervisor in uptime.yml).
+# ============================================================================
+groups:
+  - name: proxmox
+    rules:
+      - alert: ProxmoxExporterDown
+        # We cannot see Proxmox at all (API/exporter unreachable).
+        expr: up{job="pve"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          scope: site
+          component: proxmox-api
+        annotations:
+          summary: 'Proxmox API unreachable ({{ $labels.cluster }})'
+          description: 'prometheus-pve-exporter cannot reach the PVE API at {{ $labels.instance }} for >3m. Proxmox visibility is lost.'
+          likely_cause: 'PVE host down, pveproxy/pvedaemon stopped, API token revoked/expired, or network path to the node broken.'
+          next_step: 'Check the PVE host (console/IPMI), `systemctl status pveproxy pvedaemon`, and the argus API token. Cross-check HostDown for the hypervisor.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/pve-api-down.md'
+
+      - alert: ProxmoxGuestDown
+        # A specific VM/LXC that should be running is not. Distinct from host down.
+        expr: pve_up{id=~"qemu/.*|lxc/.*"} == 0
+        for: 3m
+        labels:
+          severity: warning
+          scope: single
+          component: proxmox-guest
+        annotations:
+          summary: 'Proxmox guest {{ $labels.id }} is not running'
+          description: 'Guest {{ $labels.id }} on node {{ $labels.node }} is stopped/paused while the PVE host is up.'
+          likely_cause: 'Guest crashed/OOM, was shut down, failed to boot after an update, or storage for its disk is unavailable.'
+          next_step: 'In the PVE UI check the guest task log & console. `qm status <id>` / `pct status <id>`. Look for OOM or disk errors before restarting.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/pve-guest-down.md'
+
+      - alert: ProxmoxStorageFull
+        expr: (pve_disk_usage_bytes{id=~"storage/.*"} / pve_disk_size_bytes{id=~"storage/.*"}) * 100 > 88
+        for: 15m
+        labels:
+          severity: warning
+          scope: site
+          component: proxmox-storage
+        annotations:
+          summary: 'Proxmox storage {{ $labels.id }} is {{ $value | printf "%.0f" }}% full'
+          description: 'PVE storage {{ $labels.id }} above 88% used for 15m. Backups, snapshots and guest disks are at risk.'
+          likely_cause: 'Accumulating backups/snapshots/ISOs or a thin pool nearing capacity.'
+          next_step: 'Prune old backups/snapshots, check retention. For thin LVM/ZFS, watch for metadata exhaustion.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/pve-storage-full.md'
+
+      - alert: ProxmoxClusterNoQuorum
+        # Exporter exposes cluster quorum via pve_up{id="cluster/<name>"}; 0 = not quorate.
+        # (No series on a single-node setup -> never fires, which is correct.)
+        expr: max by (id) (pve_up{id=~"cluster/.*"}) == 0
+        for: 1m
+        labels:
+          severity: critical
+          scope: site
+          component: proxmox-cluster
+        annotations:
+          summary: 'Proxmox cluster has lost quorum'
+          description: 'The PVE cluster is not quorate — HA actions and config changes are blocked.'
+          likely_cause: 'Corosync link loss between nodes, a node down, or network partition.'
+          next_step: 'Check `pvecm status`, corosync links, and inter-node connectivity. Restore the missing node or the corosync ring.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/pve-quorum.md'
+
+      # --- ZFS (textfile collector: agents/textfile-collectors/zfs_health.sh) ---
+      - alert: ZfsPoolDegraded
+        expr: argus_zfs_pool_health > 0
+        for: 1m
+        labels:
+          severity: critical
+          scope: host
+          component: zfs
+        annotations:
+          summary: 'ZFS pool {{ $labels.pool }} on {{ $labels.host }} is not ONLINE'
+          description: 'Pool {{ $labels.pool }} reports a non-healthy state (DEGRADED/FAULTED/OFFLINE).'
+          likely_cause: 'A vdev/disk failed or is unavailable; pool may be running without redundancy.'
+          next_step: '`zpool status -v {{ $labels.pool }}` to find the bad device; replace/resilver. Verify backups before any risky action.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/zfs-degraded.md'
+
+      - alert: ZfsScrubOverdue
+        expr: argus_zfs_scrub_age_seconds > (35 * 24 * 3600)
+        for: 1h
+        labels:
+          severity: info
+          scope: host
+          component: zfs
+        annotations:
+          summary: 'ZFS pool {{ $labels.pool }} scrub overdue (> 35 days)'
+          description: 'No completed scrub on {{ $labels.pool }} for over 35 days — latent corruption may go undetected.'
+          likely_cause: 'Scrub schedule/cron not running.'
+          next_step: 'Run `zpool scrub {{ $labels.pool }}` and confirm the periodic scrub timer is enabled.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/zfs-scrub.md'
+
+      # --- Backups (textfile collector: agents/textfile-collectors/pve_backup.sh) ---
+      - alert: ProxmoxBackupFailed
+        expr: argus_pve_backup_last_status != 0
+        for: 1m
+        labels:
+          severity: critical
+          scope: single
+          component: backup
+        annotations:
+          summary: 'Backup of {{ $labels.guest }} failed (job {{ $labels.job }})'
+          description: 'The most recent backup of guest {{ $labels.guest }} did not complete successfully.'
+          likely_cause: 'Storage full/unreachable, PBS down, guest fsfreeze/agent issue, or job timeout.'
+          next_step: 'Check the vzdump/PBS task log for {{ $labels.guest }}. Confirm backup storage health and re-run the job.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/pve-backup-failed.md'
+
+      - alert: ProxmoxBackupStale
+        expr: (time() - argus_pve_backup_last_success_timestamp) > (36 * 3600)
+        for: 1h
+        labels:
+          severity: warning
+          scope: single
+          component: backup
+        annotations:
+          summary: 'No successful backup of {{ $labels.guest }} in > 36h'
+          description: 'Last successful backup of {{ $labels.guest }} is older than 36h — recovery point is drifting.'
+          likely_cause: 'Backup schedule disabled/failing silently, or the job never started.'
+          next_step: 'Verify the backup schedule for {{ $labels.guest }} and that the storage/PBS target is reachable.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/pve-backup-stale.md'

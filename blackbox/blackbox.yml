@@ -1,0 +1,49 @@
+# ============================================================================
+# Argus — Blackbox exporter modules.
+# ============================================================================
+modules:
+  # HTTP up + (for HTTPS) records probe_ssl_earliest_cert_expiry for cert rules.
+  http_2xx:
+    prober: http
+    timeout: 8s
+    http:
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      valid_status_codes: []          # default = 2xx
+      method: GET
+      follow_redirects: true
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: true
+      tls_config:
+        insecure_skip_verify: true    # self-signed (e.g. Proxmox UI) still reports expiry
+
+  # POST variant for endpoints that need it.
+  http_post_2xx:
+    prober: http
+    timeout: 8s
+    http:
+      method: POST
+      preferred_ip_protocol: ip4
+
+  # Raw TCP connect (service ports: SSH, DB, web UI, etc.)
+  tcp_connect:
+    prober: tcp
+    timeout: 6s
+    tcp:
+      preferred_ip_protocol: ip4
+
+  # ICMP echo — reachability + RTT (probe_icmp_duration_seconds) + loss.
+  icmp:
+    prober: icmp
+    timeout: 5s
+    icmp:
+      preferred_ip_protocol: ip4
+
+  # DNS resolution check against the probed resolver.
+  dns_udp:
+    prober: dns
+    timeout: 5s
+    dns:
+      transport_protocol: udp
+      query_name: "example.com"       # change to a name you always expect to resolve
+      query_type: A
+      valid_rcodes: ["NOERROR"]

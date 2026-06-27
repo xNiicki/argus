@@ -1,0 +1,122 @@
+# ============================================================================
+# Metrics & resources — CPU, RAM, disk + SMART, temps, load, container health.
+# Uses node_exporter + cAdvisor series.
+# ============================================================================
+groups:
+  - name: resources
+    rules:
+      - alert: HighCpu
+        expr: 100 * (1 - avg by (host, instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 90
+        for: 15m
+        labels:
+          severity: warning
+          scope: host
+          component: cpu
+        annotations:
+          summary: 'High CPU on {{ $labels.host }} ({{ $value | printf "%.0f" }}%)'
+          description: 'CPU utilisation on {{ $labels.host }} has been > 90% for 15m.'
+          likely_cause: 'Runaway process, undersized guest, batch job, or a stuck/looping container.'
+          next_step: 'top/htop on the host; `docker stats`; check for a recently started job. Consider raising vCPU on the guest.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/high-cpu.md'
+
+      - alert: HighMemory
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 92
+        for: 10m
+        labels:
+          severity: warning
+          scope: host
+          component: memory
+        annotations:
+          summary: 'High memory on {{ $labels.host }} ({{ $value | printf "%.0f" }}%)'
+          description: 'Available memory on {{ $labels.host }} below 8% for 10m — OOM risk.'
+          likely_cause: 'Memory leak, too many containers, or cache pressure. OOM killer may fire soon.'
+          next_step: 'Check `free -h`, top memory consumers, container limits. Restart the offending service or add RAM to the guest.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/high-memory.md'
+
+      - alert: DiskFillingUp
+        expr: |
+          (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}
+            / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"}) * 100 < 12
+        for: 15m
+        labels:
+          severity: warning
+          scope: host
+          component: disk
+        annotations:
+          summary: 'Low disk on {{ $labels.host }} {{ $labels.mountpoint }} ({{ $value | printf "%.0f" }}% free)'
+          description: 'Filesystem {{ $labels.mountpoint }} on {{ $labels.host }} below 12% free for 15m.'
+          likely_cause: 'Logs/backups/images growing, a runaway writer, or snapshots accumulating.'
+          next_step: 'du -xh --max-depth=1 on the mount; prune logs/images/old backups; check snapshot retention.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/disk-full.md'
+
+      - alert: DiskWillFillSoon
+        # Linear-predict: will this filesystem hit 0 within 12h based on last 6h slope?
+        expr: |
+          predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}[6h], 12*3600) < 0
+        for: 30m
+        labels:
+          severity: critical
+          scope: host
+          component: disk
+        annotations:
+          summary: 'Disk on {{ $labels.host }} {{ $labels.mountpoint }} will fill within ~12h'
+          description: 'Projected to reach 0 bytes free within 12h at the current write rate.'
+          likely_cause: 'Sustained write growth — runaway log, backup loop, or a stuck process writing fast.'
+          next_step: 'Identify the writer NOW (`iotop`, `du`), stop/rotate it before the filesystem fills and services crash.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/disk-full.md'
+
+      - alert: SmartFailurePredicted
+        expr: smartmon_device_smart_healthy == 0 or node_smartmon_device_smart_healthy == 0
+        for: 5m
+        labels:
+          severity: critical
+          scope: host
+          component: disk-smart
+        annotations:
+          summary: 'SMART reports a failing disk on {{ $labels.host }}'
+          description: 'A disk on {{ $labels.host }} reports SMART health = not OK. Drive failure may be imminent.'
+          likely_cause: 'Physical disk degradation (reallocated/pending sectors, wear-out).'
+          next_step: 'Run `smartctl -a <dev>`, ensure backups are current, plan a replacement. On ZFS, check pool redundancy first.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/smart-fail.md'
+
+      - alert: HighTemperature
+        expr: node_hwmon_temp_celsius > 85
+        for: 10m
+        labels:
+          severity: warning
+          scope: host
+          component: temperature
+        annotations:
+          summary: 'High temperature on {{ $labels.host }} ({{ $value | printf "%.0f" }}°C)'
+          description: 'Sensor {{ $labels.sensor }} on {{ $labels.host }} above 85°C for 10m.'
+          likely_cause: 'Cooling/airflow problem, dust, failed fan, or sustained load.'
+          next_step: 'Check fans and intake temps; reduce load; verify the chassis is not enclosed/overheating.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/high-temp.md'
+
+      - alert: HighLoad
+        expr: node_load5 / count by (host, instance) (node_cpu_seconds_total{mode="idle"}) > 2
+        for: 15m
+        labels:
+          severity: warning
+          scope: host
+          component: load
+        annotations:
+          summary: 'High load average on {{ $labels.host }}'
+          description: '5-min load per core on {{ $labels.host }} above 2.0 for 15m — contention.'
+          likely_cause: 'CPU oversubscription or IO wait (blocked tasks). Often disk/IO rather than CPU.'
+          next_step: 'Check `uptime`, iowait in `top`, and disk latency. Distinguish CPU-bound vs IO-bound.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/high-load.md'
+
+      - alert: ContainerRestartLoop
+        expr: increase(container_start_time_seconds{name!=""}[15m]) > 3
+        for: 5m
+        labels:
+          severity: warning
+          scope: single
+          component: container
+        annotations:
+          summary: 'Container {{ $labels.name }} is restart-looping on {{ $labels.host }}'
+          description: 'Container {{ $labels.name }} restarted >3 times in 15m (crash loop).'
+          likely_cause: 'Bad config/env, failing health check, missing dependency, or OOM-kill.'
+          next_step: '`docker logs <name>` for the crash reason; check the health check and resource limits.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/container-crashloop.md'

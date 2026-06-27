@@ -1,0 +1,92 @@
+# ============================================================================
+# Network & internet — LAN gateway, WAN uptime, DNS, latency/packet loss,
+# and the homelab<->Hetzner cross-site path. The `tier` label
+# (gateway|wan|cross-site|dns) drives how serious the narrator treats it.
+# ============================================================================
+groups:
+  - name: network
+    rules:
+      - alert: GatewayUnreachable
+        expr: probe_success{job="blackbox-icmp", tier="gateway"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          scope: site
+          component: gateway
+        annotations:
+          summary: 'LAN gateway {{ $labels.target_name }} unreachable'
+          description: 'ICMP to the gateway ({{ $labels.instance }}) failing for >1m — local network is broken.'
+          likely_cause: 'Router rebooted/crashed, switch/VLAN problem, or this host lost its link.'
+          next_step: 'Check the router and switch; confirm this collector host still has link/IP. Nothing else on the LAN will work until this is back.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/gateway-down.md'
+
+      - alert: WanDown
+        # Both upstream anchors must fail to call it a real WAN outage.
+        expr: count(probe_success{job="blackbox-icmp", tier="wan"} == 0) == count(probe_success{job="blackbox-icmp", tier="wan"})
+        for: 2m
+        labels:
+          severity: critical
+          scope: site
+          component: wan
+        annotations:
+          summary: 'Internet (WAN) is down at {{ $labels.site }}'
+          description: 'All upstream WAN anchors are unreachable for >2m — the site has no internet.'
+          likely_cause: 'ISP outage, modem/ONT down, or the router lost its WAN uplink. (Gateway may still be reachable on the LAN.)'
+          next_step: 'Check modem/ONT lights and router WAN status; reboot the modem if needed; check ISP status page.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/wan-down.md'
+
+      - alert: HighPacketLossWan
+        expr: avg_over_time(probe_icmp_duration_seconds{job="blackbox-icmp", tier="wan"}[5m]) == 0
+        for: 5m
+        labels:
+          severity: warning
+          scope: site
+          component: wan
+        annotations:
+          summary: 'WAN latency anomaly at {{ $labels.site }}'
+          description: 'No successful ICMP RTT samples to WAN anchors over 5m — likely heavy packet loss.'
+          likely_cause: 'Congested or degraded uplink, ISP routing issue.'
+          next_step: 'Run a continuous ping/mtr to 1.1.1.1; check the router for errors/retransmits; contact ISP if persistent.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/wan-loss.md'
+
+      - alert: HighLatencyCrossSite
+        expr: avg_over_time(probe_icmp_duration_seconds{job="blackbox-icmp", tier="cross-site"}[5m]) > 0.15
+        for: 10m
+        labels:
+          severity: warning
+          scope: site
+          component: cross-site
+        annotations:
+          summary: 'High latency on homelab<->Hetzner path ({{ $value | printf "%.0f" }}ms)'
+          description: 'Average RTT to the Hetzner path above 150ms for 10m.'
+          likely_cause: 'WAN congestion, suboptimal routing, or VPN/tunnel overhead between the sites.'
+          next_step: 'mtr to the peer; check the VPN/tunnel; compare against ISP baseline.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/cross-site-latency.md'
+
+      - alert: CrossSitePathDown
+        expr: probe_success{job="blackbox-icmp", tier="cross-site"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          scope: site
+          component: cross-site
+        annotations:
+          summary: 'homelab<->Hetzner path is down'
+          description: 'Cannot reach the peer site over the network for >3m.'
+          likely_cause: 'Peer site WAN outage, VPN/tunnel down, or routing/firewall change. (See peer cross-watch — the other side may already be alerting.)'
+          next_step: 'Check the VPN/tunnel and both sites'' WAN. The peer narrator''s cross-watch should corroborate which side is at fault.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/cross-site-down.md'
+
+      - alert: DnsResolutionFailing
+        expr: probe_success{job="blackbox-dns"} == 0
+        for: 3m
+        labels:
+          severity: warning
+          scope: site
+          component: dns
+        annotations:
+          summary: 'DNS resolver {{ $labels.resolver }} is failing'
+          description: 'Resolver {{ $labels.instance }} returned no NOERROR for the test query for >3m.'
+          likely_cause: 'Resolver service down (Pi-hole/Unbound/router), upstream DNS outage, or blocklist update broke resolution.'
+          next_step: 'dig @resolver example.com; restart the resolver; check upstream DNS and recent blocklist changes.'
+          runbook: 'https://github.com/your-org/argus/blob/main/docs/runbooks/dns-down.md'

@@ -1,0 +1,130 @@
+# ============================================================================
+# Argus — Prometheus. Targets live in ./targets/*.yml (file_sd) so you add
+# hosts/endpoints WITHOUT editing this file. Alert rules in ./alerts/*.yml.
+# ============================================================================
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+  external_labels:
+    site: ${ARGUS_SITE}          # set via env in compose; identifies homelab vs hetzner
+
+rule_files:
+  - /etc/prometheus/alerts/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # --- Prometheus self-monitoring ------------------------------------------
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # --- node_exporter on every host (CPU/RAM/disk/SMART/temps/load) ----------
+  - job_name: node
+    file_sd_configs:
+      - files: ["/etc/prometheus/targets/nodes.yml"]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  # --- cAdvisor (container health/resource) --------------------------------
+  - job_name: cadvisor
+    file_sd_configs:
+      - files: ["/etc/prometheus/targets/cadvisor.yml"]
+
+  # --- prometheus-pve-exporter (Proxmox node/VM/LXC/storage/backup) ---------
+  # The exporter takes the PVE target as a `target` URL param and proxies.
+  - job_name: pve
+    metrics_path: /pve
+    params:
+      module: [default]
+      cluster: ["1"]
+      node: ["1"]
+    file_sd_configs:
+      - files: ["/etc/prometheus/targets/pve.yml"]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: pve-exporter:9221
+
+  # --- Blackbox: HTTP endpoints --------------------------------------------
+  - job_name: blackbox-http
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    file_sd_configs:
+      - files: ["/etc/prometheus/targets/blackbox-http.yml"]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  # --- Blackbox: TCP service ports -----------------------------------------
+  - job_name: blackbox-tcp
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    file_sd_configs:
+      - files: ["/etc/prometheus/targets/blackbox-tcp.yml"]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  # --- Blackbox: ICMP (LAN/gateway/WAN/peer reachability + latency) ---------
+  - job_name: blackbox-icmp
+    metrics_path: /probe
+    params:
+      module: [icmp]
+    file_sd_configs:
+      - files: ["/etc/prometheus/targets/blackbox-icmp.yml"]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  # --- Blackbox: SSL cert expiry (HTTPS) -----------------------------------
+  - job_name: blackbox-ssl
+    metrics_path: /probe
+    params:
+      module: [http_2xx]      # http_2xx records probe_ssl_earliest_cert_expiry
+    file_sd_configs:
+      - files: ["/etc/prometheus/targets/blackbox-ssl.yml"]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  # --- DNS resolution checks -----------------------------------------------
+  - job_name: blackbox-dns
+    metrics_path: /probe
+    params:
+      module: [dns_udp]
+    file_sd_configs:
+      - files: ["/etc/prometheus/targets/blackbox-dns.yml"]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
