@@ -1,20 +1,14 @@
-name: build-narrator
+name: build-images
 
-# Builds the custom narrator image and pushes it to GHCR.
-# All other services in the stack use upstream public images already.
+# Builds every Argus image (configs baked in) and pushes to GHCR, multi-arch.
 on:
   push:
     branches: [main]
-    paths:
-      - "narrator/**"
-      - ".github/workflows/build-narrator.yml"
-    tags:
-      - "v*"
+    tags: ["v*"]
   workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/argus-narrator
 
 jobs:
   build:
@@ -22,6 +16,14 @@ jobs:
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        include:
+          - { name: narrator,     context: ./narrator }
+          - { name: prometheus,   context: ./prometheus }
+          - { name: alertmanager, context: ./alertmanager }
+          - { name: blackbox,     context: ./blackbox }
+          - { name: loki,         context: ./loki }
     steps:
       - uses: actions/checkout@v4
 
@@ -36,27 +38,25 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # latest on main, semver on v* tags, plus the short SHA always
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/argus-${{ matrix.name }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short
 
-      - name: Set up QEMU (for arm64 emulation)
+      - name: Set up QEMU (arm64 emulation)
         uses: docker/setup-qemu-action@v3
-
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: ./narrator
+          context: ${{ matrix.context }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

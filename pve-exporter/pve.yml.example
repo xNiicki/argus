@@ -1,9 +1,0 @@
-# Copy to pve.yml (gitignored). Create a PVE API token with role PVEAuditor:
-#   pveum user add argus@pve
-#   pveum aclmod / -user argus@pve -role PVEAuditor
-#   pveum user token add argus@pve monitoring --privsep 0
-default:
-  user: argus@pve
-  token_name: monitoring
-  token_value: "REPLACE-WITH-TOKEN-VALUE"
-  verify_ssl: false        # Proxmox uses a self-signed cert by default

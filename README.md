@@ -57,53 +57,59 @@ Tune everything in [`narrator/config/narrator.yml`](narrator/config/narrator.yml
   alarm for it. Run one full stack per site (`ARGUS_SITE=homelab` / `hetzner`)
   and set `PEER_NARRATOR_URL` on each.
 
-## Quick start (central stack, per site)
+## Quick start
+
+Every config is baked into the images — the **only** file you touch is `.env`.
 
 ```bash
 git clone https://github.com/xNiicki/argus.git && cd argus
-cp .env.example .env          # set ARGUS_SITE, NTFY_*, PVE_TARGET, PEER_NARRATOR_URL
-cp pve-exporter/pve.yml.example pve-exporter/pve.yml   # PVE API token
-# edit prometheus/targets/*.yml -> your hosts/endpoints
-make up                       # pulls narrator image from GHCR + starts the stack
-make validate                 # promtool + amtool + compose checks
-make test                     # narrator unit tests
+cp .env.example .env          # set ARGUS_SITE, NTFY_*, ARGUS_*_TARGETS, PVE_*
+docker compose up -d          # pulls all images from GHCR + starts the stack
 ```
 
-The custom **narrator** image is built by CI and published to
-`ghcr.io/xniicki/argus-narrator` (tags: `latest`, `v*`, short SHA). Pin a version
-with `ARGUS_TAG=v1.2.3` in `.env`. To build it from local source instead — e.g.
-when hacking on the narrator — use `make dev` (which layers `docker-compose.build.yml`).
+(Or hand someone just `docker-compose.yml` + a filled-in `.env`, or paste both into
+Portainer/Dockge — no repo folders required.)
 
-Then install the [agents](agents/README.md) on each host and point the central
-Prometheus targets at them.
+### Configure what to monitor — in `.env`
 
-### Paste-anywhere deploy (single file)
-
-`docker-compose.portable.yml` is a **self-contained** version of the stack: every
-config (Prometheus rules, alerts, blackbox modules, narrator policy, …) is inlined
-via Compose `configs:`, so there are **no sibling folders** to clone. Drop it into
-Portainer / Dockge / a bare host, supply env vars, and go:
+Targets are comma-separated lists. Each entry is `host:port`, or `name=host:port`
+for a friendly label; append `!insecure` to skip TLS verification (self-signed):
 
 ```bash
-ARGUS_SITE=homelab NTFY_TOPIC=argus PVE_TOKEN_VALUE=... \
-  docker compose -f docker-compose.portable.yml up -d
+ARGUS_NODE_TARGETS=web1=10.0.0.5:9100,db1=10.0.0.6:9100   # node_exporter hosts
+ARGUS_HTTP_TARGETS=site=https://acme.com                  # HTTP up + cert expiry
+ARGUS_ICMP_TARGETS=gw=10.0.0.1,wan=1.1.1.1                # ping/reachability
+ARGUS_SSL_TARGETS=pve=https://10.0.0.10:8006!insecure     # cert tracking (self-signed)
+ARGUS_PVE_TARGET=10.0.0.10                                # Proxmox via pve-exporter
 ```
 
-Secrets are never baked in — `NTFY_TOKEN`, `PVE_TOKEN_VALUE`, `OPENROUTER_API_KEY`,
-etc. come from the environment (Portainer's env UI, an `.env`, or `-e`). The file is
-generated from the source configs (single source of truth) — never edit it by hand;
-run `make portable` after changing any config. CI fails if it drifts.
+An entrypoint renders the Prometheus scrape config from these at startup. To pin a
+version, set `ARGUS_TAG=v1.2.3`. To build the images locally instead of pulling,
+`make build`.
+
+Install the [agents](agents/README.md) (node_exporter + cAdvisor) on each host you
+list, then point the targets above at them.
+
+## Images
+
+All images are built by CI (multi-arch amd64/arm64) and published to GHCR; configs
+are baked in, so the stack pulls and runs with no mounted files:
+
+`argus-prometheus` · `argus-alertmanager` · `argus-blackbox` · `argus-loki` · `argus-narrator`
+(all under `ghcr.io/xniicki/`). Only the **narrator** is custom code; the rest are
+upstream images with the Argus config baked on top. `pve-exporter` is upstream,
+configured purely via `PVE_*` env vars.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `docker-compose.yml` | central stack: prometheus, alertmanager, blackbox, pve-exporter, narrator |
-| `prometheus/prometheus.yml` | scrape jobs (file_sd) + alertmanager wiring |
-| `prometheus/targets/*.yml` | **edit these** to add hosts/endpoints |
-| `prometheus/alerts/*.yml` | rules: uptime, certs, resources, proxmox, network, watchdog |
-| `blackbox/blackbox.yml` | http/tcp/icmp/ssl/dns probe modules |
-| `alertmanager/alertmanager.yml` | routes ALL alerts → narrator |
+| `docker-compose.yml` | the whole stack — images + env only, no bind mounts |
+| `.env.example` | the one file a deployer fills in |
+| `prometheus/` | `prometheus.yml`, `alerts/*.yml`, and `docker-entrypoint.sh` (renders targets from env) |
+| `blackbox/` | http/tcp/icmp/ssl/dns probe modules + Dockerfile |
+| `alertmanager/` | routes ALL alerts → narrator + Dockerfile |
+| `loki/` | Loki config + LogQL rules + Dockerfile |
 | `narrator/` | the brain (FastAPI); policy in `config/narrator.yml`, tests in `tests/` |
 | `agents/` | per-host node_exporter + cAdvisor + textfile collectors |
 

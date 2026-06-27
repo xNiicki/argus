@@ -1,36 +1,33 @@
-.PHONY: help up dev down restart logs reload pull portable validate test narrator-test promtool amtool fmt
-
-DEV := -f docker-compose.yml -f docker-compose.build.yml
+.PHONY: help up down restart logs pull build validate test narrator-test promtool amtool fmt
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "\033[36m%-16s\033[0m %s\n",$$1,$$2}'
 
-up: ## Start the central stack (pulls narrator image from GHCR)
+up: ## Start the stack (pulls images from GHCR)
 	docker compose up -d
 
-dev: ## Start the stack building narrator from local source
-	docker compose $(DEV) up -d --build
-
-pull: ## Pull the latest narrator image from GHCR
-	docker compose pull narrator
-
-down: ## Stop the central stack
+down: ## Stop the stack
 	docker compose down
 
-restart: ## Recreate all services (pulls latest images)
+restart: ## Pull latest images and recreate
 	docker compose pull && docker compose up -d --force-recreate
+
+pull: ## Pull the latest images from GHCR
+	docker compose pull
+
+IMG := ghcr.io/xniicki/argus
+TAG ?= latest
+build: ## Build all images locally (tagged so `make up` uses them)
+	docker build -t $(IMG)-narrator:$(TAG)     ./narrator
+	docker build -t $(IMG)-prometheus:$(TAG)   ./prometheus
+	docker build -t $(IMG)-alertmanager:$(TAG) ./alertmanager
+	docker build -t $(IMG)-blackbox:$(TAG)     ./blackbox
+	docker build -t $(IMG)-loki:$(TAG)         ./loki
 
 logs: ## Tail narrator logs
 	docker compose logs -f narrator
 
-reload: ## Hot-reload Prometheus config (no restart)
-	curl -fsS -XPOST http://localhost:9090/-/reload && echo "prometheus reloaded"
-
-portable: ## Regenerate the self-contained docker-compose.portable.yml from source configs
-	@python3 -c 'import yaml' 2>/dev/null && PY=python3 || PY=narrator/.venv/bin/python; \
-		$$PY scripts/gen-portable-compose.py
-
-validate: promtool amtool ## Validate all config (prometheus rules + alertmanager + compose)
+validate: promtool amtool ## Validate configs + compose
 	docker compose config -q && echo "compose OK"
 
 promtool: ## Check Prometheus config + alert rules

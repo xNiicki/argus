@@ -48,7 +48,7 @@ ruler:
   storage:
     type: local
     local:
-      directory: /loki/rules
+      directory: /etc/loki/rules     # baked into the image (NOT the /loki data volume)
   rule_path: /loki/rule-tmp
   alertmanager_url: http://alertmanager:9093
   enable_alertmanager_v2: true
