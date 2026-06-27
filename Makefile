@@ -1,4 +1,4 @@
-.PHONY: help up dev down restart logs reload pull validate test narrator-test promtool amtool fmt
+.PHONY: help up dev down restart logs reload pull portable validate test narrator-test promtool amtool fmt
 
 DEV := -f docker-compose.yml -f docker-compose.build.yml
 
@@ -25,6 +25,10 @@ logs: ## Tail narrator logs
 
 reload: ## Hot-reload Prometheus config (no restart)
 	curl -fsS -XPOST http://localhost:9090/-/reload && echo "prometheus reloaded"
+
+portable: ## Regenerate the self-contained docker-compose.portable.yml from source configs
+	@python3 -c 'import yaml' 2>/dev/null && PY=python3 || PY=narrator/.venv/bin/python; \
+		$$PY scripts/gen-portable-compose.py
 
 validate: promtool amtool ## Validate all config (prometheus rules + alertmanager + compose)
 	docker compose config -q && echo "compose OK"

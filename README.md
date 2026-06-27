@@ -77,6 +77,23 @@ when hacking on the narrator — use `make dev` (which layers `docker-compose.bu
 Then install the [agents](agents/README.md) on each host and point the central
 Prometheus targets at them.
 
+### Paste-anywhere deploy (single file)
+
+`docker-compose.portable.yml` is a **self-contained** version of the stack: every
+config (Prometheus rules, alerts, blackbox modules, narrator policy, …) is inlined
+via Compose `configs:`, so there are **no sibling folders** to clone. Drop it into
+Portainer / Dockge / a bare host, supply env vars, and go:
+
+```bash
+ARGUS_SITE=homelab NTFY_TOPIC=argus PVE_TOKEN_VALUE=... \
+  docker compose -f docker-compose.portable.yml up -d
+```
+
+Secrets are never baked in — `NTFY_TOKEN`, `PVE_TOKEN_VALUE`, `OPENROUTER_API_KEY`,
+etc. come from the environment (Portainer's env UI, an `.env`, or `-e`). The file is
+generated from the source configs (single source of truth) — never edit it by hand;
+run `make portable` after changing any config. CI fails if it drifts.
+
 ## Layout
 
 | Path | What |
