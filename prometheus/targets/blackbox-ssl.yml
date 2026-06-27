@@ -11,3 +11,4 @@
     service: pve-webui
     role: hypervisor
     site: homelab
+    tls: insecure                   # self-signed: skip chain/hostname verify (expiry still tracked)

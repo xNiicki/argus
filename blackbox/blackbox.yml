@@ -3,6 +3,9 @@
 # ============================================================================
 modules:
   # HTTP up + (for HTTPS) records probe_ssl_earliest_cert_expiry for cert rules.
+  # TLS is VERIFIED here: an invalid/untrusted/expired cert on a public endpoint
+  # fails the probe (and pages you). Internal self-signed targets must instead use
+  # the http_2xx_insecure module below (opt in via a `tls: insecure` target label).
   http_2xx:
     prober: http
     timeout: 8s
@@ -13,8 +16,23 @@ modules:
       follow_redirects: true
       preferred_ip_protocol: ip4
       ip_protocol_fallback: true
+
+  # Same as http_2xx but skips TLS verification — for internal self-signed certs
+  # (e.g. the Proxmox UI). Cert EXPIRY is still recorded, so expiry alerts keep
+  # working; only chain/hostname/trust validation is waived. Do NOT use this for
+  # public endpoints. Select it with `tls: insecure` on the target in file_sd.
+  http_2xx_insecure:
+    prober: http
+    timeout: 8s
+    http:
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      valid_status_codes: []
+      method: GET
+      follow_redirects: true
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: true
       tls_config:
-        insecure_skip_verify: true    # self-signed (e.g. Proxmox UI) still reports expiry
+        insecure_skip_verify: true
 
   # POST variant for endpoints that need it.
   http_post_2xx:

@@ -58,7 +58,7 @@ scrape_configs:
   - job_name: blackbox-http
     metrics_path: /probe
     params:
-      module: [http_2xx]
+      module: [http_2xx]      # strict TLS by default; opt out per-target with `tls: insecure`
     file_sd_configs:
       - files: ["/etc/prometheus/targets/blackbox-http.yml"]
     relabel_configs:
@@ -66,6 +66,11 @@ scrape_configs:
         target_label: __param_target
       - source_labels: [__param_target]
         target_label: instance
+      # targets labelled `tls: insecure` (self-signed) use the no-verify module
+      - source_labels: [tls]
+        regex: insecure
+        target_label: __param_module
+        replacement: http_2xx_insecure
       - target_label: __address__
         replacement: blackbox:9115
 
@@ -103,7 +108,7 @@ scrape_configs:
   - job_name: blackbox-ssl
     metrics_path: /probe
     params:
-      module: [http_2xx]      # http_2xx records probe_ssl_earliest_cert_expiry
+      module: [http_2xx]      # http_2xx records probe_ssl_earliest_cert_expiry (TLS verified)
     file_sd_configs:
       - files: ["/etc/prometheus/targets/blackbox-ssl.yml"]
     relabel_configs:
@@ -111,6 +116,11 @@ scrape_configs:
         target_label: __param_target
       - source_labels: [__param_target]
         target_label: instance
+      # self-signed targets (e.g. Proxmox UI) labelled `tls: insecure` skip verification
+      - source_labels: [tls]
+        regex: insecure
+        target_label: __param_module
+        replacement: http_2xx_insecure
       - target_label: __address__
         replacement: blackbox:9115
 
